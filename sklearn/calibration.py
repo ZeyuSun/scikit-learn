@@ -1217,7 +1217,10 @@ class _TemperatureScaling(RegressorMixin, BaseEstimator):
         "y_true": ["array-like"],
         "y_prob": ["array-like"],
         "pos_label": [Real, str, "boolean", None],
-        "n_bins": [Interval(Integral, 1, None, closed="left")],
+        "n_bins": [
+            Interval(Integral, 1, None, closed="left"),
+            StrOptions({"cube_root"}),
+        ],
         "strategy": [StrOptions({"uniform", "quantile"})],
     },
     prefer_skip_nested_validation=True,
@@ -1252,11 +1255,17 @@ def calibration_curve(
 
         .. versionadded:: 1.1
 
-    n_bins : int, default=5
+    n_bins : int or "cube_root", default=5
         Number of bins to discretize the [0, 1] interval. A bigger number
         requires more data. Bins with no samples (i.e. without
         corresponding values in `y_prob`) will not be returned, thus the
         returned arrays may have less than `n_bins` values.
+        If "cube_root", the number of bins is set to
+        ``int(np.ceil(n_samples ** (1/3)))`` to balance the trade-off between
+        bias and variance.
+
+        .. versionadded:: 1.9
+           The "cube_root" option was added.
 
     strategy : {'uniform', 'quantile'}, default='uniform'
         Strategy used to define the widths of the bins.
@@ -1289,6 +1298,13 @@ def calibration_curve(
     International Conference on Machine Learning (ICML).
     See section 4 (Qualitative Analysis of Predictions).
 
+    Sun, Z., Song, D., & Hero, A. O. (2023). Minimum-Risk Recalibration of
+    Classifiers, in Advances in Neural Information Processing Systems (NeurIPS).
+
+    Futami, F., & Fujisawa, M. (2024). Information-Theoretic Generalization
+    Analysis for Expected Calibration Error, in Advances in Neural Information
+    Processing Systems (NeurIPS).
+
     Examples
     --------
     >>> import numpy as np
@@ -1305,6 +1321,9 @@ def calibration_curve(
     y_prob = column_or_1d(y_prob)
     check_consistent_length(y_true, y_prob)
     pos_label = _check_pos_label_consistency(pos_label, y_true)
+
+    if n_bins == "cube_root":
+        n_bins = int(np.ceil(len(y_true) ** (1 / 3)))
 
     if y_prob.min() < 0 or y_prob.max() > 1:
         raise ValueError("y_prob has values outside [0, 1].")
@@ -1522,10 +1541,16 @@ class CalibrationDisplay(_BinaryClassifierCurveDisplayMixin):
         y : array-like of shape (n_samples,)
             Binary target values.
 
-        n_bins : int, default=5
+        n_bins : int or "cube_root", default=5
             Number of bins to discretize the [0, 1] interval into when
             calculating the calibration curve. A bigger number requires more
             data.
+            If "cube_root", the number of bins is set to
+            ``int(np.ceil(n_samples ** (1/3)))`` to balance the trade-off
+            between bias and variance.
+
+            .. versionadded:: 1.9
+               The "cube_root" option was added.
 
         strategy : {'uniform', 'quantile'}, default='uniform'
             Strategy used to define the widths of the bins.
@@ -1640,10 +1665,16 @@ class CalibrationDisplay(_BinaryClassifierCurveDisplayMixin):
         y_prob : array-like of shape (n_samples,)
             The predicted probabilities of the positive class.
 
-        n_bins : int, default=5
+        n_bins : int or "cube_root", default=5
             Number of bins to discretize the [0, 1] interval into when
             calculating the calibration curve. A bigger number requires more
             data.
+            If "cube_root", the number of bins is set to
+            ``int(np.ceil(n_samples ** (1/3)))`` to balance the trade-off
+            between bias and variance.
+
+            .. versionadded:: 1.9
+               The "cube_root" option was added.
 
         strategy : {'uniform', 'quantile'}, default='uniform'
             Strategy used to define the widths of the bins.
