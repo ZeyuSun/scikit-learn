@@ -3,6 +3,7 @@
 # Authors: The scikit-learn developers
 # SPDX-License-Identifier: BSD-3-Clause
 
+import math
 import warnings
 from inspect import signature
 from math import log
@@ -1322,9 +1323,6 @@ def calibration_curve(
     check_consistent_length(y_true, y_prob)
     pos_label = _check_pos_label_consistency(pos_label, y_true)
 
-    if n_bins == "cube_root":
-        n_bins = int(np.ceil(len(y_true) ** (1 / 3)))
-
     if y_prob.min() < 0 or y_prob.max() > 1:
         raise ValueError("y_prob has values outside [0, 1].")
 
@@ -1334,6 +1332,9 @@ def calibration_curve(
             f"Only binary classification is supported. Provided labels {labels}."
         )
     y_true = y_true == pos_label
+
+    if n_bins == "cube_root":
+        n_bins = math.ceil(len(y_true) ** (1 / 3))
 
     if strategy == "quantile":  # Determine bin edges by distribution of data
         quantiles = np.linspace(0, 1, n_bins + 1)
