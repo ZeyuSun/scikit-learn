@@ -3,10 +3,9 @@
 # Authors: The scikit-learn developers
 # SPDX-License-Identifier: BSD-3-Clause
 
-import math
 import warnings
 from inspect import signature
-from math import log
+from math import ceil, log
 from numbers import Integral, Real
 
 import numpy as np
@@ -1262,7 +1261,7 @@ def calibration_curve(
         corresponding values in `y_prob`) will not be returned, thus the
         returned arrays may have less than `n_bins` values.
         If "cube_root", the number of bins is set to
-        ``int(np.ceil(n_samples ** (1/3)))`` to balance the trade-off between
+        ``ceil(n_samples ** (1/3))`` to balance the trade-off between
         bias and variance.
 
         .. versionadded:: 1.9
@@ -1334,7 +1333,7 @@ def calibration_curve(
     y_true = y_true == pos_label
 
     if n_bins == "cube_root":
-        n_bins = math.ceil(len(y_true) ** (1 / 3))
+        n_bins = ceil(len(y_true) ** (1 / 3))
 
     if strategy == "quantile":  # Determine bin edges by distribution of data
         quantiles = np.linspace(0, 1, n_bins + 1)
@@ -1547,7 +1546,7 @@ class CalibrationDisplay(_BinaryClassifierCurveDisplayMixin):
             calculating the calibration curve. A bigger number requires more
             data.
             If "cube_root", the number of bins is set to
-            ``int(np.ceil(n_samples ** (1/3)))`` to balance the trade-off
+            ``ceil(n_samples ** (1/3))`` to balance the trade-off
             between bias and variance.
 
             .. versionadded:: 1.9
@@ -1671,7 +1670,7 @@ class CalibrationDisplay(_BinaryClassifierCurveDisplayMixin):
             calculating the calibration curve. A bigger number requires more
             data.
             If "cube_root", the number of bins is set to
-            ``int(np.ceil(n_samples ** (1/3)))`` to balance the trade-off
+            ``ceil(n_samples ** (1/3))`` to balance the trade-off
             between bias and variance.
 
             .. versionadded:: 1.9
