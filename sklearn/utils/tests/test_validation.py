@@ -65,6 +65,7 @@ from sklearn.utils.fixes import (
 from sklearn.utils.validation import (
     FLOAT_DTYPES,
     _allclose_dense_sparse,
+    _check_categorical_features,
     _check_feature_names_in,
     _check_method_params,
     _check_pos_label_consistency,
@@ -1075,7 +1076,7 @@ def test_check_consistent_length():
 )
 def test_check_consistent_length_array_api(array_namespace, device_name, dtype_name):
     """Test that check_consistent_length works with different array types."""
-    xp, device = _array_api_for_tests(array_namespace, device_name)
+    xp, device = _array_api_for_tests(array_namespace, device_name, dtype_name)
 
     with config_context(array_api_dispatch=True):
         check_consistent_length(
@@ -1366,7 +1367,9 @@ def test_check_X_y_informative_error():
         check_X_y(X, y, estimator=RandomForestRegressor())
 
 
-def test_retrieve_samples_from_non_standard_shape():
+def test_num_samples_on_non_standard_shape():
+    """Test _num_samples on different non standard input X."""
+
     class TestNonNumericShape:
         def __init__(self):
             self.shape = ("not numeric",)
@@ -1384,6 +1387,37 @@ def test_retrieve_samples_from_non_standard_shape():
 
     with pytest.raises(TypeError, match="Expected sequence or array-like"):
         _num_samples(TestNoLenWeirdShape())
+
+    class TestNoLenNoShapeButArrayProtocol:
+        def __init__(self, x):
+            self.x = x
+
+        def __array__(self, dtype=None, copy=None):
+            return np.asarray(self.x, dtype=dtype)  # copy needs numpy >= 2.0
+
+    X = TestNoLenNoShapeButArrayProtocol(np.arange(3))
+    assert _num_samples(X) == 3
+    X = TestNoLenNoShapeButArrayProtocol(np.arange(6).reshape(3, 2))
+    assert _num_samples(X) == 3
+
+
+@pytest.mark.parametrize(
+    "constructor_name", ["list", "tuple", "array", "series", "polars_series"]
+)
+def test_num_samples_on_1d(constructor_name):
+    """Test _num_samples on different 1d input X."""
+    X = _convert_container(list(range(3)), constructor_name)
+    assert _num_samples(X) == 3
+
+
+@pytest.mark.parametrize(
+    "constructor_name",
+    ["list", "tuple", "array", "sparse", "dataframe", "pandas", "pyarrow", "polars"],
+)
+def test_num_samples_on_dataframe_likes(constructor_name):
+    """Test _num_samples on different dataframe-like input X."""
+    X = _convert_container([[1, 11], [2, 22], [3, 33]], constructor_name)
+    assert _num_samples(X) == 3
 
 
 @pytest.mark.parametrize("x", [2, 3, 2.5, 5])
@@ -1699,7 +1733,7 @@ def test_check_sample_weight():
     yield_namespace_device_dtype_combinations(),
 )
 def test_check_sample_weight_array_api(array_namespace, device_name, dtype_name):
-    xp, device = _array_api_for_tests(array_namespace, device_name)
+    xp, device = _array_api_for_tests(array_namespace, device_name, dtype_name)
     with config_context(array_api_dispatch=True):
         # check array order
         sample_weight = xp.ones(10)[::2]
@@ -1725,7 +1759,7 @@ def test_check_pos_label_consistency(y_true):
 def test_check_pos_label_consistency_array_api(
     array_namespace, device_name, dtype_name, y_true
 ):
-    xp, device = _array_api_for_tests(array_namespace, device_name)
+    xp, device = _array_api_for_tests(array_namespace, device_name, dtype_name)
     with config_context(array_api_dispatch=True):
         arr = xp.asarray(y_true, device=device)
         assert _check_pos_label_consistency(None, arr) == 1
@@ -1747,7 +1781,7 @@ def test_check_pos_label_consistency_invalid(y_true):
 def test_check_pos_label_consistency_invalid_array_api(
     array_namespace, device_name, dtype_name, y_true
 ):
-    xp, device = _array_api_for_tests(array_namespace, device_name)
+    xp, device = _array_api_for_tests(array_namespace, device_name, dtype_name)
     with config_context(array_api_dispatch=True):
         arr = xp.asarray(y_true, device=device)
         with pytest.raises(ValueError, match="y_true takes value in"):
@@ -2037,10 +2071,10 @@ def test_get_feature_names_pandas():
 
 @pytest.mark.parametrize(
     "constructor_name, minversion",
-    [("pyarrow", "12.0.0"), ("dataframe", "1.5.0"), ("polars", "0.18.2")],
+    [("pyarrow", "13.0.0"), ("dataframe", "1.5.0"), ("polars", "0.18.2")],
 )
-def test_get_feature_names_dataframe_protocol(constructor_name, minversion):
-    """Uses the dataframe exchange protocol to get feature names."""
+def test_get_feature_names_4_dataframes(constructor_name, minversion):
+    """Test _get_features_names on dataframes."""
     data = [[1, 4, 2], [3, 3, 6]]
     columns = ["col_0", "col_1", "col_2"]
     df = _convert_container(
@@ -2062,9 +2096,9 @@ def test_get_feature_names_numpy():
     "names, dtypes",
     [
         (["a", 1], "['int', 'str']"),
-        (["pizza", ["a", "b"]], "['list', 'str']"),
+        (["pizza", ("a", "b")], "['str', 'tuple']"),
     ],
-    ids=["int-str", "list-str"],
+    ids=["str-int", "str-tuple"],
 )
 def test_get_feature_names_invalid_dtypes(names, dtypes):
     """Get feature names errors when the feature names have mixed dtypes"""
@@ -2254,23 +2288,6 @@ def test_check_array_multiple_extensions(
     assert_array_equal(X_regular_checked, X_extension_checked)
 
 
-def test_num_samples_dataframe_protocol():
-    """Use the DataFrame interchange protocol to get n_samples."""
-    pa = pytest.importorskip("pyarrow")
-
-    class MockDFInterchange:
-        """A dataframe class without .shape attr but with __dataframe__ protocol"""
-
-        def __init__(self, *args, **kwargs):
-            self.df = pa.table(*args, **kwargs)
-
-        def __dataframe__(self):
-            return self.df.__dataframe__()
-
-    df = MockDFInterchange({"a": [1, 2, 3], "b": [4, 5, 6]})
-    assert _num_samples(df) == 3
-
-
 @pytest.mark.parametrize(
     "sparse_container",
     CSR_CONTAINERS + CSC_CONTAINERS + COO_CONTAINERS + DIA_CONTAINERS,
@@ -2423,3 +2440,76 @@ def test_check_array_on_sparse_inputs_with_array_api_enabled():
 def test_check_array_allow_nd_errors(X, estimator, expected_error_message):
     with pytest.raises(ValueError, match=expected_error_message):
         check_array(X, estimator=estimator)
+
+
+@pytest.mark.parametrize(
+    ["categorical_features", "expected_msg"],
+    [
+        (
+            [b"hello", b"world"],
+            re.escape(
+                "categorical_features must be an array-like of bool, int or str, "
+                "got: bytes40."
+            ),
+        ),
+        (
+            np.array([b"hello", 1.3], dtype=object),
+            re.escape(
+                "categorical_features must be an array-like of bool, int or str, "
+                "got: bytes, float."
+            ),
+        ),
+        (
+            [0, -1],
+            re.escape(
+                "categorical_features set as integer indices must be in "
+                "[0, n_features - 1]"
+            ),
+        ),
+        (
+            [True, True, False, False, True],
+            re.escape(
+                "categorical_features set as a boolean mask must have shape "
+                "(n_features,)"
+            ),
+        ),
+    ],
+)
+def test_check_categorical_features_raises(categorical_features, expected_msg):
+    """Test that check_categorical_features raises expected errors."""
+    rng = np.random.RandomState(0)
+    n_samples, n_features = 10, 10
+    X = rng.randint(0, 3, size=(n_samples, n_features))
+
+    with pytest.raises(ValueError, match=expected_msg):
+        _check_categorical_features(X, categorical_features)
+
+
+@pytest.mark.parametrize(
+    ["categorical_features", "on_array"],
+    [
+        ([False, True, True, False], True),
+        ([1, 2], True),
+        (["b", "c"], False),
+        ("from_dtype", False),
+    ],
+)
+@pytest.mark.parametrize("constructor_name", ["array", "pandas", "polars"])
+def test_check_categorical_features(categorical_features, on_array, constructor_name):
+    """Test that check_categorical_features returns as expected on simple data."""
+    rng = np.random.RandomState(0)
+    n_samples, n_features = 30, 4
+    X = rng.randint(0, 3, size=(n_samples, n_features))
+    if constructor_name == "array" and not on_array:
+        return
+    elif constructor_name == "polars":
+        X = X.astype(str)
+    X = _convert_container(
+        X,
+        constructor_name,
+        columns_name=["a", "b", "c", "d"],
+        categorical_feature_names=["b", "c"],
+    )
+
+    result = _check_categorical_features(X, categorical_features)
+    assert_allclose(result, [False, True, True, False])
